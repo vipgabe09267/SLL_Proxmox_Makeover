@@ -1,0 +1,23 @@
+Proxmox Makeover by Southland Labs, 0.1-beta
+
+Copyright (C) 2026 Southland Labs.
+
+Project code and supplied Southland Labs PNG artwork are licensed under the
+GNU Affero General Public License, version 3 only (AGPL-3.0-only); see LICENSE. Trademark rights are not granted by that license. Proxmox is a
+trademark of Proxmox Server Solutions GmbH. This independent community project
+is not affiliated with or endorsed by Proxmox.
+
+The bundled DM Sans and Oxanium font files retain their SIL Open Font
+License 1.1 notices in assets/fonts/. Font choices use local files or system
+fonts; browsers do not contact a third-party font service. Proxmox/ExtJS/vendor files are
+not included in this distribution; the installed system supplies its own files
+and licenses.
+
+Primary passkey verification uses the separately installed python-fido2 and
+cryptography packages; they are not vendored or relicensed by this project.
+python-fido2's WebAuthn server implementation is copyright Yubico AB under its
+BSD 2-Clause license. Its distribution also carries Apache-2.0 material; retain
+the package's complete upstream/Debian notices when redistributing it.
+See https://github.com/Yubico/python-fido2/tree/1.2.0 and the Debian package
+copyright file for dependency notices. Installing dependencies through Debian
+keeps those notices with the packages. Project code and artwork are AGPL-3.0-only.

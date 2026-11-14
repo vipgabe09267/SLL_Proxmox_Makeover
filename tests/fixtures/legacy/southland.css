@@ -1,0 +1,196 @@
+/* Southland Labs: charcoal green surfaces, warm gold accents, native Proxmox controls. */
+:root.sls-brand {
+    color-scheme: dark;
+    --sls-bg: #141716;
+    --sls-surface: #1b201e;
+    --sls-raised: #242b26;
+    --sls-border: #343c36;
+    --sls-accent: #d5b98c;
+    --sls-violet: #bac8ad;
+    --sls-text: #eeede6;
+    --sls-muted: #a5ada7;
+    --pwt-panel-background: #1b201e;
+    --pwt-text-color: #eeede6;
+    --pwt-gauge-default: #b39564;
+    --pwt-gauge-back: #343c36;
+    --pwt-chart-primary: #d5b98c;
+    --pwt-chart-grid-stroke: #343c36;
+}
+.sls-brand .x-body, .sls-brand body.x-border-layout-ct, .sls-brand div.x-border-layout-ct {
+    background-color: var(--sls-bg); color: var(--sls-text);
+}
+.sls-brand .x-panel-body-default, .sls-brand .x-window-body-default,
+.sls-brand .x-toolbar, .sls-brand .x-toolbar-default, .sls-brand .pve-toolbar-bg,
+.sls-brand .x-tab-bar-default, .sls-brand .x-treelist-pve-nav, .sls-brand .x-treelist-item {
+    background-color: var(--sls-surface); border-color: var(--sls-border); color: var(--sls-text);
+}
+.sls-brand .x-panel-header-default, .sls-brand .x-window-header-default {
+    background: var(--sls-raised); border-color: var(--sls-border);
+}
+.sls-brand .x-panel-header-title-default, .sls-brand .x-window-header-title-default { color: #e4cda7; }
+.sls-brand .x-window-default { background: var(--sls-surface); border-color: var(--sls-border); border-radius: 8px; }
+.sls-brand .x-panel-default-outer-border-trl, .sls-brand .x-panel-default-outer-border-rbl,
+.sls-brand .x-panel-default-outer-border-rl, .sls-brand .x-panel-default-outer-border-trbl { border-color: var(--sls-border) !important; }
+.sls-brand .x-grid-item { background-color: var(--sls-surface); color: var(--sls-text); }
+.sls-brand .x-grid-item-alt { background-color: #202622; }
+.sls-brand .x-grid-with-row-lines .x-grid-item { border-color: #303832; }
+.sls-brand .x-grid-item-over, .sls-brand .x-treelist-row-over { background-color: #303832; }
+.sls-brand .x-grid-item-selected, .sls-brand .x-treelist-item-selected > .x-treelist-row { background-color: #453b2c; }
+.sls-brand .x-column-header-default, .sls-brand .x-grid-header-ct, .sls-brand .x-grid-group-hd {
+    background-color: var(--sls-raised); border-color: var(--sls-border); color: var(--sls-text);
+}
+.sls-brand .x-grid-cell-special, .sls-brand .x-column-header, .sls-brand .x-fieldset-default { border-color: var(--sls-border); }
+.sls-brand .x-btn-default-toolbar-small { background: #242b26; border-color: #4c574d; border-radius: 5px; }
+.sls-brand .x-btn-default-toolbar-small.x-btn-over { background: #343c36; border-color: #d5b98c; }
+.sls-brand .x-btn-default-small { background: #d5b98c; border-color: #d5b98c; border-radius: 5px; }
+.sls-brand .x-btn-default-small.x-btn-over { background: #e4cda7; border-color: #d5b98c; }
+.sls-brand .x-btn.x-btn-disabled { opacity: .5; }
+.sls-brand .x-keyboard-mode .x-btn-focus { outline: 2px solid #e4cda7; outline-offset: 2px; }
+.sls-brand .x-form-text-default, .sls-brand .x-form-trigger-default, .sls-brand .x-form-spinner-default {
+    background-color: #111512; color: var(--sls-text);
+}
+.sls-brand .x-form-trigger-wrap-default { border-color: #4c574d; border-radius: 4px; }
+.sls-brand .x-form-trigger-wrap-default.x-form-trigger-wrap-focus { border-color: #d5b98c; box-shadow: 0 0 0 2px rgb(213 185 140 / 12%); }
+.sls-brand .x-form-trigger-wrap-invalid { border-color: #edaaa4; }
+.sls-brand .x-boundlist, .sls-brand .x-boundlist-item, .sls-brand .x-menu-default, .sls-brand .x-menu-body-default {
+    background-color: #242b26; border-color: var(--sls-border); color: var(--sls-text);
+}
+.sls-brand .x-boundlist-selected, .sls-brand .x-boundlist-item-over, .sls-brand .x-menu-item-active {
+    background-color: #453b2c; border-color: #736750;
+}
+.sls-brand .x-tab-default-top { background-color: var(--sls-surface); border-color: var(--sls-surface); }
+.sls-brand .x-tab-default.x-tab.x-tab-active { background: #453b2c; border-color: #d5b98c; }
+.sls-brand .x-tab-default.x-tab-over { background-color: #303832; border-color: #5c675e; }
+.sls-brand .x-splitter { background-color: var(--sls-bg); }
+.sls-brand .x-progress-default { background: #343c36; }
+.sls-brand .x-progress-default .x-progress-bar-default { background: #b39564; }
+.sls-brand .x-progress.warning .x-progress-bar { background: var(--pwt-gauge-warn); }
+.sls-brand .x-progress.critical .x-progress-bar { background: var(--pwt-gauge-crit); }
+.sls-brand .proxmox-invalid-row { background-color: #521414; }
+.sls-brand .proxmox-warning-row { background-color: #554018; }
+.sls-brand .x-grid-icon-custom.lxc::after, .sls-brand .x-grid-icon-custom.qemu::after,
+.sls-brand .x-tree-icon-custom.lxc::after, .sls-brand .x-tree-icon-custom.qemu::after { background-color: var(--sls-surface); }
+.sls-brand .x-mask { background: rgb(8 11 9 / 80%); }
+.sls-brand .x-mask-msg, .sls-brand .x-tip-default { background-color: #242b26; border-color: #4c574d; }
+.sls-brand .sls-dashboard-header {
+    background: #141716;
+    border-bottom: 1px solid #343c36 !important;
+    box-shadow: 0 3px 16px rgb(0 0 0 / 16%);
+}
+.sls-brand #versioninfo { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #d5b98c; font-size: 13px !important; }
+.sls-brand #userinfo { background-color: #242b26 !important; border-color: #4c574d !important; border-radius: 5px; }
+.sls-brand .sls-dashboard-header .x-btn-inner { color: #eeede6; }
+.sls-brand .sls-dashboard-header .x-btn-icon-el { color: #d5b98c; }
+.sls-brand .sls-logo { border-radius: 7px; overflow: hidden; }
+.sls-brand .sls-logo img { display: block; width: 100%; height: 100%; }
+.sls-brand .sls-logo img, .sls-brand img[id^="proxmoxLogoSvg-"], .sls-brand img[id^="proxmoxlogo-"] {
+    filter: none !important; object-fit: contain;
+}
+
+/* The scene appears only while the native login window exists. */
+#sls-login-scene { display: none; }
+.sls-login-active #sls-login-scene {
+    display: block; position: fixed; inset: 0; z-index: 1; pointer-events: none;
+    background: #141716;
+}
+.sls-login-active > .x-border-item { visibility: hidden; }
+.sls-login-active > .x-mask { background: transparent; backdrop-filter: none; }
+.sls-scene-brand { position: absolute; top: 30px; left: 38px; font: 600 18px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 3px; color: #e4cda7; }
+.sls-scene-brand span { display: block; font: 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 4px; color: #a5ada7; margin-top: 5px; }
+.sls-scene-label { position: absolute; top: 38px; right: 38px; font: 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 2px; color: #a5ada7; }
+.sls-scene-bottom { position: absolute; bottom: 28px; width: 100%; text-align: center; font: 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 3px; color: #a5ada7; }
+.sls-brand .sls-login-window {
+    padding: 0; border: 1px solid #343c36 !important; border-radius: 18px;
+    background: #1b201e; box-shadow: 0 28px 90px rgb(0 0 0 / 45%), 0 0 60px rgb(56 189 248 / 4%);
+    overflow: hidden;
+}
+.sls-brand .sls-login-window::before { content: ''; position: absolute; inset: 0 0 auto; height: 3px; background: linear-gradient(90deg, #d5b98c, #bac8ad); z-index: 2; }
+.sls-brand .sls-login-window .x-window-body-default { border: 0; background: #1b201e; }
+.sls-brand .sls-login-window .x-form-item-label-default,
+.sls-brand .sls-login-window .x-form-text-default,
+.sls-brand .sls-login-window .x-form-cb-label-default { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.sls-brand .sls-login-window .x-form-item-label-default { color: #eeede6; font-size: 12px; padding-bottom: 6px; }
+.sls-brand .sls-login-window .x-form-text-default { min-height: 38px; padding: 7px 12px; font-size: 14px; }
+.sls-brand .sls-login-window .x-form-trigger-default { background-position: 0 center; }
+.sls-brand .sls-login-window .x-form-trigger-wrap-default { border-radius: 7px; overflow: hidden; }
+.sls-brand .sls-login-window .x-toolbar { border: 0; }
+.sls-brand .sls-login-window .x-btn { margin-right: 0; }
+.sls-login-intro { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; margin: 0 0 24px; }
+.sls-login-logo { display: block; width: 100%; height: 128px; object-fit: contain; border-radius: 4px; margin-bottom: 23px; }
+.sls-eyebrow { color: #e4cda7; font: 600 10px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; letter-spacing: 2px; margin-bottom: 9px; }
+.sls-login-intro h1 { font: 600 29px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #eeede6; margin: 0 0 9px; }
+.sls-login-intro h1 span { color: #d5b98c; }
+.sls-login-intro p { font-size: 13px; line-height: 1.5; color: #a5ada7; margin: 0; }
+.sls-brand .sls-login-button { background: #d5b98c; border: none; border-radius: 7px; }
+.sls-brand .sls-login-button.x-btn-over { background: #e4cda7; }
+.sls-brand .sls-login-button .x-btn-inner { color: #191c17; font: bold 14px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.sls-login-footer { border-top: 1px solid #343c36; margin-top: 22px; padding-top: 18px; text-align: center; color: #a5ada7; font: 11px/1.8 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.sls-login-footer .fa { color: #e4cda7; margin-right: 5px; }
+.sls-powered { display: block; font-size: 10px; color: #a5ada7; }
+@media (max-width: 600px) {
+    .sls-scene-brand, .sls-scene-label, .sls-scene-bottom { display: none; }
+}
+@media (max-height: 820px) {
+    .sls-scene-brand, .sls-scene-label, .sls-scene-bottom { display: none; }
+    .sls-login-logo { width: 100%; height: 100px; max-height: 100px; background: transparent; margin-bottom: 15px; }
+    .sls-login-intro { margin-bottom: 16px; }
+}
+
+/* Shared Southland site styling, refreshed 2026-09-20. */
+.sls-brand { --sls-font: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; scrollbar-color: #5c675e #141716; }
+.sls-brand .x-body { font-family: var(--sls-font); }
+.sls-brand .sls-dashboard-header { box-shadow: none; }
+.sls-brand .x-btn-default-small .x-btn-inner, .sls-brand .x-btn-default-small .x-btn-icon-el { color: #191c17; }
+.sls-brand .x-btn-default-toolbar-small .x-btn-inner { color: #eeede6; }
+.sls-brand .sls-dashboard-header .x-btn:not(#userinfo) .x-btn-inner,
+.sls-brand .sls-dashboard-header .x-btn:not(#userinfo) .x-btn-icon-el { color: #191c17; }
+.sls-brand .x-btn, .sls-brand .x-form-trigger-wrap-default { border-radius: 4px; }
+.sls-brand .x-form-item-label-default, .sls-brand .x-form-display-field-default,
+.sls-brand .x-form-cb-label-default, .sls-brand .x-toolbar-text-default { color: #eeede6; }
+.sls-brand .x-treelist-item-text, .sls-brand .x-treelist-item-icon { color: #eeede6; }
+.sls-brand .sls-login-window { border-radius: 6px; box-shadow: 0 18px 48px #0003; }
+.sls-brand .sls-login-window::before { display: none; }
+.sls-brand .sls-login-window .x-form-trigger-wrap-default { border-radius: 4px; }
+.sls-login-intro h1 { font: 400 36px/1.15 Georgia, "Times New Roman", serif; letter-spacing: -.025em; }
+.sls-eyebrow { font: 400 12px/1.5 var(--sls-font); letter-spacing: 0; text-transform: none; }
+.sls-scene-brand { font: 600 16px/1.4 var(--sls-font); letter-spacing: -.015em; color: #eeede6; }
+.sls-scene-brand span { font: 400 12px/1.5 var(--sls-font); letter-spacing: 0; }
+.sls-scene-label, .sls-scene-bottom { font: 400 12px/1.5 var(--sls-font); letter-spacing: 0; }
+.sls-brand .sls-login-button { border-radius: 4px; }
+.sls-brand .sls-login-window .sls-login-button .x-btn-inner { color: #191c17; }
+.sls-brand .x-btn-default-toolbar-small .x-btn-icon-el { color: #eeede6; }
+.sls-brand .x-btn.x-btn-default-small .x-btn-inner,
+.sls-brand .x-btn.x-btn-default-small .x-btn-icon-el { color: #191c17; }
+.sls-brand .x-btn.x-btn-default-small.x-btn-pressed { background-color: #e4cda7; border-color: #e4cda7; }
+.sls-brand #userinfo .x-btn-inner, .sls-brand #userinfo .x-btn-icon-el { color: #eeede6; }
+.sls-brand .x-progress-default .x-progress-bar-default { background-color: #6b5635; }
+.sls-brand .x-progress-default .x-progress-text { color: #eeede6; }
+.sls-brand .x-progress.warning .x-progress-bar .x-progress-text { color: #191c17; }
+.sls-brand .x-btn.x-btn-default-small.x-btn-disabled,
+.sls-brand .x-btn.x-btn-default-toolbar-small.x-btn-disabled { background-color: #343c36; border-color: #4c574d; opacity: .65; }
+.sls-brand .x-btn.x-btn-disabled .x-btn-inner, .sls-brand .x-btn.x-btn-disabled .x-btn-icon-el { color: #a5ada7; }
+.sls-brand .x-btn.x-btn-default-toolbar-small:not(.x-btn-default-small):is(.x-btn-pressed,.x-btn-menu-active,.x-btn-focus) { background-color: #453b2c; border-color: #d5b98c; }
+.sls-brand .x-tool .x-tool-img { filter: grayscale(1) brightness(3); }
+.sls-brand .x-tool .x-tool-tool-el { color: #d5b98c; }
+.sls-brand .x-tree-arrows .x-tree-expander-over .x-tree-expander { filter: brightness(220%); }
+.sls-brand ::selection { background: #5c533e; color: white; }
+
+/* Native API storage overview in the node Summary. */
+.sls-node-storage .x-panel-body { font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.sls-node-storage p { margin: 0 0 10px; }
+.sls-storage-total { font-weight: 600; }
+.sls-storage-disks { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+.sls-storage-disk { flex: 1 1 220px; padding: 9px 11px; border: 1px solid #707870; border-radius: 4px; }
+.sls-storage-disk strong, .sls-storage-disk span { display: block; overflow-wrap: anywhere; }
+.sls-storage-disk span { font-size: 12px; }
+.sls-storage-table { width: 100%; border-collapse: collapse; text-align: left; }
+.sls-storage-table th, .sls-storage-table td { padding: 6px 8px; vertical-align: top; }
+.sls-storage-table thead { border-bottom: 1px solid #707870; }
+.sls-storage-table tbody th { width: 30%; font-weight: 500; }
+.sls-storage-table small { display: block; font-size: 11px; font-weight: 400; }
+.sls-storage-percent { white-space: nowrap; }
+.sls-storage-bar { height: 5px; margin-top: 5px; background: #565e58; border-radius: 3px; overflow: hidden; }
+.sls-storage-bar span { display: block; height: 100%; background: #8eac85; }
+.sls-storage-bar.warning span { background: #e2ad51; }
+.sls-storage-bar.critical span { background: #df7373; }
+.sls-node-storage .sls-storage-note { margin: 10px 0 0; font-size: 11px; }

@@ -1,0 +1,47 @@
+name: Checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+permissions:
+  contents: read
+jobs:
+  isolated:
+    # Noble ships fido2 1.1; this supported image supplies fido2 2.x.
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install test dependencies
+        run: sudo apt-get update && sudo apt-get install -y python3-pil python3-fido2 python3-cryptography liburi-perl libwww-perl libio-compress-perl
+      - name: Syntax
+        run: |
+          bash -n install.sh
+          bash -n bootstrap.sh
+          node --check makeover.js
+          node --check login-passkeys.js
+          node --check native-security.js
+          node --check southland.js
+          python3 -m py_compile sls-proxmox-branding scripts/lifecycle.py scripts/release_inputs.py scripts/passkeys.py tools/build-release.py
+      - name: API fault and validation tests
+        run: |
+          sudo env MAKEOVER_TEST_REAL_HELPER=1 perl -T tests/test-api.pl
+          sudo perl -T tests/test-passkeys-api.pl
+      - name: Native PVE HTTP integration when vendor libraries are available
+        run: |
+          if perl -MPVE::HTTPServer -e 1 >/dev/null 2>&1; then
+            sudo perl -T tests/test-passkeys-http.pl
+          else
+            echo 'SKIP: native PVE HTTP integration requires an installed PVE runtime; it was not run in this job.'
+          fi
+      - name: Package replacement and installer fixtures
+        run: sudo python3 -m unittest discover -s tests -p 'test*.py' -v
+      - name: Build source release
+        run: |
+          python3 tools/build-release.py
+          cd dist
+          sha256sum --check SHA256SUMS

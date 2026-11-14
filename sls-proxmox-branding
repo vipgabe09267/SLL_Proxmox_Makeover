@@ -1,0 +1,478 @@
+#!/usr/bin/python3
+"""Proxmox Makeover: validate and apply a small overlay to the current vendor UI."""
+import argparse
+import base64
+import contextlib
+import fcntl
+import hashlib
+import io
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import struct
+import sys
+import tempfile
+from urllib.parse import urlsplit
+import warnings
+import zlib
+
+VERSION = '0.1-beta'
+BEGIN = '<!-- BEGIN SOUTHLAND BRANDING -->'
+END = '<!-- END SOUTHLAND BRANDING -->'
+TEMPLATE = '/usr/share/pve-manager/index.html.tpl'
+MANAGER = '/usr/share/pve-manager'
+WIDGETS = '/usr/share/javascript/proxmox-widget-toolkit'
+MAKEOVER_CONFIG = '/etc/sll-proxmox-makeover/config.json'
+MAKEOVER_SOURCE = '/usr/local/share/sls-proxmox-branding/makeover'
+CONTROL_STATE = '/var/lib/proxmox-makeover'
+CONTROL_LOCK = CONTROL_STATE + '/control.lock'
+MAINTENANCE = CONTROL_STATE + '/maintenance.json'
+OVERLAY_LOCK = '/var/lib/sls-proxmox-branding/overlay.lock'
+DEFAULT_MAKEOVER_CONFIG = {
+    'schema_version': 2,
+    'company_name': 'Southland Labs', 'project_name': 'Proxmox Makeover',
+    'product_label': 'Proxmox VE',
+    'page_title': 'Infrastructure - Southland Labs | Proxmox VE',
+    'login_eyebrow': 'Infrastructure console', 'login_heading': 'Welcome back.',
+    'login_subtitle': 'Sign in to manage your infrastructure.',
+    'footer_text': 'Southland Labs', 'website_url': 'https://southlandlabs.dev/',
+    'show_storage_panel': True, 'update_safe': True,
+    'fonts': {'login': 'default', 'dashboard': 'default'},
+    'colors': {'background': '#141716', 'surface': '#1b201e', 'raised': '#242b26',
+               'border': '#343c36', 'accent': '#d5b98c', 'secondary': '#bac8ad',
+               'text': '#eeede6', 'muted': '#a5ada7'},
+}
+FONT_PRESETS = ('default', 'system', 'dm-sans', 'oxanium', 'serif', 'monospace')
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def no_symlinks(path):
+    path = Path(path).absolute()
+    if '..' in path.parts:
+        raise RuntimeError('Parent traversal is not allowed in managed paths.')
+    path = Path('/' + str(path).lstrip('/'))
+    for component in [*reversed(path.parents), path]:
+        if component.is_symlink():
+            raise RuntimeError(f'Refusing symlink in managed path: {component}')
+    return path
+
+
+def read_bytes(path, maximum=16 * 1024 * 1024):
+    path = no_symlinks(path)
+    if not path.is_file() or path.stat().st_size > maximum:
+        raise RuntimeError(f'Missing, oversized or non-regular input: {path}')
+    return path.read_bytes()
+
+
+def atomic(path, data, mode=0o644):
+    path = no_symlinks(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix='.sls-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fchmod(stream.fileno(), mode)
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        dir_fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def strip_block(template):
+    if template.count(BEGIN) != template.count(END) or template.count(BEGIN) > 1:
+        raise RuntimeError('Unrecognized branding markers; leaving the template untouched.')
+    if BEGIN not in template:
+        return template
+    pattern = r'(?m)^[ \t]*' + re.escape(BEGIN) + r'.*?' + re.escape(END) + r'\r?\n?'
+    clean, count = re.subn(pattern, '', template, flags=re.S)
+    if count != 1:
+        raise RuntimeError('Unable to remove existing overlay safely.')
+    return clean
+
+
+def validate_config(config):
+    if not isinstance(config, dict):
+        raise RuntimeError('Makeover configuration must be a JSON object.')
+    config = dict(config)
+    version = config.get('schema_version')
+    if type(version) is not int or version not in (1, 2):
+        raise RuntimeError('Unsupported Makeover schema version.')
+    if version == 1:
+        if 'update_safe' in config or 'fonts' in config:
+            raise RuntimeError('Unknown field in legacy Makeover configuration.')
+        config.update(schema_version=2, update_safe=True)
+    # Pre-font schema-2 files remain valid, without rewriting operator files.
+    config.setdefault('fonts', dict(DEFAULT_MAKEOVER_CONFIG['fonts']))
+    if set(config) != set(DEFAULT_MAKEOVER_CONFIG):
+        raise RuntimeError('Makeover configuration fields are invalid.')
+    limits = {'company_name': 80, 'project_name': 80, 'product_label': 80, 'page_title': 160,
+              'login_eyebrow': 100, 'login_heading': 100, 'login_subtitle': 240, 'footer_text': 120}
+    for key, limit in limits.items():
+        value = config[key]
+        if not isinstance(value, str) or not value or len(value) > limit or re.search(r'[\x00-\x1f\x7f]', value):
+            raise RuntimeError(f'Invalid Makeover text field: {key}')
+    url = config['website_url']
+    if not isinstance(url, str) or len(url) > 512 or re.search(r'[\s\x00-\x1f\x7f]', url):
+        raise RuntimeError('Makeover website must be a safe HTTPS URL.')
+    try:
+        parsed = urlsplit(url)
+        valid = (parsed.scheme == 'https' and parsed.hostname and
+                 re.fullmatch(r'[A-Za-z0-9.-]+', parsed.hostname) and
+                 parsed.username is None and parsed.password is None and
+                 (parsed.port is None or 1 <= parsed.port <= 65535))
+    except ValueError:
+        valid = False
+    if not valid or '\\' in url:
+        raise RuntimeError('Makeover website must be a safe HTTPS URL.')
+    for key in ('show_storage_panel', 'update_safe'):
+        if type(config[key]) is not bool:
+            raise RuntimeError(f'Makeover {key} must be boolean.')
+    fonts = config['fonts']
+    if not isinstance(fonts, dict) or set(fonts) != {'login', 'dashboard'}:
+        raise RuntimeError('Makeover font fields are invalid.')
+    for key, value in fonts.items():
+        if not isinstance(value, str) or value not in FONT_PRESETS:
+            raise RuntimeError(f'Invalid Makeover font: {key}')
+    colors = config['colors']
+    if not isinstance(colors, dict) or set(colors) != set(DEFAULT_MAKEOVER_CONFIG['colors']):
+        raise RuntimeError('Makeover color fields are invalid.')
+    for key, value in colors.items():
+        if not isinstance(value, str) or not re.fullmatch(r'#[0-9a-fA-F]{6}', value):
+            raise RuntimeError(f'Invalid Makeover color: {key}')
+    return config
+
+
+def load_makeover_config(path):
+    if not no_symlinks(path).exists():
+        return json.loads(json.dumps(DEFAULT_MAKEOVER_CONFIG))
+    return validate_config(json.loads(read_bytes(path, 128 * 1024)))
+
+
+def validate_png(data, kind):
+    if not 45 <= len(data) <= 3 * 1024 * 1024 or data[:8] != b'\x89PNG\r\n\x1a\n':
+        raise RuntimeError('Artwork must be a PNG of at most 3 MiB.')
+    offset, width, height, ihdr, idat, iend = 8, 0, 0, False, False, False
+    while offset < len(data):
+        if offset + 12 > len(data):
+            raise RuntimeError('Truncated PNG chunk.')
+        length, = struct.unpack('>I', data[offset:offset + 4])
+        name = data[offset + 4:offset + 8]
+        if not re.fullmatch(b'[A-Za-z]{4}', name) or offset + 12 + length > len(data):
+            raise RuntimeError('Invalid PNG chunk bounds.')
+        payload = data[offset + 8:offset + 8 + length]
+        crc, = struct.unpack('>I', data[offset + 8 + length:offset + 12 + length])
+        if zlib.crc32(name + payload) & 0xffffffff != crc:
+            raise RuntimeError('PNG CRC check failed.')
+        if not ihdr:
+            if name != b'IHDR' or length != 13:
+                raise RuntimeError('PNG must start with IHDR.')
+            width, height, depth, color, compression, filt, interlace = struct.unpack('>IIBBBBB', payload)
+            valid_depths = {0: (1, 2, 4, 8, 16), 2: (8, 16), 3: (1, 2, 4, 8), 4: (8, 16), 6: (8, 16)}
+            if not 64 <= width <= 4096 or not 64 <= height <= 4096:
+                raise RuntimeError('PNG dimensions must be between 64 and 4096 pixels.')
+            if color not in valid_depths or depth not in valid_depths[color] or compression or filt or interlace not in (0, 1):
+                raise RuntimeError('Invalid PNG encoding.')
+            ihdr = True
+        elif name == b'IHDR':
+            raise RuntimeError('Duplicate PNG IHDR.')
+        if name == b'acTL':
+            raise RuntimeError('Use a static PNG; animated PNG is not supported.')
+        if name == b'IDAT':
+            idat = True
+        offset += length + 12
+        if name == b'IEND':
+            if length or not idat:
+                raise RuntimeError('Invalid PNG end or missing image data.')
+            iend = True
+            break
+    if not iend or offset != len(data):
+        raise RuntimeError('PNG is incomplete or has trailing data.')
+    if kind == 'favicon' and width != height:
+        raise RuntimeError('Favicon must be square.')
+    try:
+        from PIL import Image
+    except ImportError as error:
+        raise RuntimeError('PNG validation requires python3-pil. Install the documented prerequisite.') from error
+    Image.MAX_IMAGE_PIXELS = 4096 * 4096
+    with warnings.catch_warnings():
+        warnings.simplefilter('error')
+        with Image.open(io.BytesIO(data), formats=['PNG']) as image:
+            image.verify()
+        with Image.open(io.BytesIO(data), formats=['PNG']) as image:
+            image.load()  # verify() alone does not decode pixels.
+            if image.size != (width, height):
+                raise RuntimeError('PNG decoder dimension mismatch.')
+    return {'width': width, 'height': height, 'bytes': len(data), 'sha256': digest(data)}
+
+
+@contextlib.contextmanager
+def locked(path):
+    path = no_symlinks(path)
+    private_directory(path.parent)
+    fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, 'a') as lock:
+        info = os.fstat(lock.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid():
+            raise RuntimeError('The presentation lock is not a trusted regular file.')
+        os.fchmod(lock.fileno(), 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield
+
+
+def private_directory(path):
+    path = no_symlinks(path)
+    path.mkdir(parents=True, exist_ok=True, mode=0o700)
+    info = path.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+        raise RuntimeError('Makeover lock/state directories must be private and owned by the current root operator.')
+
+
+def maintenance_blocks(local, automatic):
+    marker = local(MAINTENANCE)
+    try:
+        info = marker.lstat()
+    except FileNotFoundError:
+        return False
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) != 0o600:
+        raise RuntimeError('Unsafe Makeover maintenance marker.')
+    if automatic:
+        print(json.dumps({'status': 'maintenance-skipped', 'version': VERSION}))
+        return True
+    raise RuntimeError('Makeover maintenance is in progress; presentation repair was not applied.')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    actions = parser.add_mutually_exclusive_group()
+    for flag, help_text in [('--check', 'Report drift without repairing files'),
+                            ('--dry-run', 'Preview planned changes'),
+                            ('--remove', 'Restore tracked current originals and disable repair'),
+                            ('--enable', 'Enable presentation after removal'),
+                            ('--validate-png', 'Validate a PNG without applying any files')]:
+        actions.add_argument(flag, **({'metavar': 'PATH'} if flag == '--validate-png' else {'action': 'store_true'}), help=help_text)
+    parser.add_argument('--root', default='/', help='Isolated filesystem root for tests')
+    parser.add_argument('--assets', help='Trusted local asset directory override')
+    parser.add_argument('--automatic', action='store_true', help='Obey the Update protection preference')
+    parser.add_argument('--lock-held', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--kind', choices=('logo', 'favicon'), default='logo')
+    args = parser.parse_args()
+    if args.validate_png:
+        print(json.dumps(validate_png(read_bytes(Path(args.validate_png), 3 * 1024 * 1024), args.kind)))
+        return 0
+    root = no_symlinks(Path(args.root).absolute())
+    if not root.is_dir():
+        raise RuntimeError('The target root must already exist.')
+    if root.samefile(Path('/')):
+        root = Path('/')
+    if root == Path('/') and os.geteuid() != 0:
+        raise RuntimeError('Applying Proxmox Makeover requires root.')
+    local = lambda path: no_symlinks(root / path.lstrip('/'))
+    private_directory(local(CONTROL_STATE))
+    # A resident pre-beta API holds the shared lock but cannot pass --lock-held.
+    # During activation it must fail before waiting on its own parent lock.
+    if not args.lock_held and maintenance_blocks(local, args.automatic):
+        return 0
+    # Always lock canonical inputs before the overlay lock, including APT/path repairs.
+    with contextlib.ExitStack() as stack:
+        if not args.lock_held:
+            stack.enter_context(locked(local(CONTROL_LOCK)))
+            # Close the race where maintenance began after the first check.
+            if maintenance_blocks(local, args.automatic):
+                return 0
+        stack.enter_context(locked(local(OVERLAY_LOCK)))
+        state = local('/var/lib/sls-proxmox-branding')
+        disabled = local('/etc/sls-proxmox-branding.disabled')
+        manifest_file = state / 'manifest.json'
+        manifest = json.loads(read_bytes(manifest_file)) if manifest_file.exists() else {}
+        allowed_targets = {
+            TEMPLATE, WIDGETS + '/images/proxmox_logo.svg',
+            *(MANAGER + '/' + name for name in (
+                'images/SLS_Proxmox.png', 'images/SLS_Proxmox_Favicon.png',
+                'images/proxmox_logo.png', 'images/logo-128.png',
+                'css/southland.css', 'css/sll-makeover.css',
+                'css/sls-dm-sans.ttf', 'css/sls-oxanium.ttf',
+                'js/southland.js', 'js/sll-makeover.js', 'js/sll-makeover-config.js')),
+        }
+        if not isinstance(manifest, dict) or set(manifest) - allowed_targets:
+            raise RuntimeError('Invalid presentation manifest.')
+        for entry in manifest.values():
+            if not isinstance(entry, dict) or not re.fullmatch('[a-f0-9]{64}', str(entry.get('installed', ''))):
+                raise RuntimeError('Invalid presentation recovery entry.')
+            if entry.get('original') is not None and not re.fullmatch('[a-f0-9]{64}', str(entry['original'])):
+                raise RuntimeError('Invalid presentation backup identifier.')
+            mode = entry.get('original_mode', 0o644)
+            if type(mode) is not int or mode < 0 or mode > 0o777:
+                raise RuntimeError('Invalid presentation backup mode.')
+        if args.enable:
+            disabled.unlink(missing_ok=True)
+        if disabled.exists() and not args.remove:
+            print(json.dumps({'status': 'disabled', 'version': VERSION}))
+            return 0
+        if args.remove:
+            current_template = local(TEMPLATE)
+            if current_template.exists():
+                current = read_bytes(current_template).decode()
+                clean = strip_block(current)
+                if clean != current:
+                    atomic(current_template, clean.encode())
+            for destination, entry in manifest.items():
+                if destination == TEMPLATE:
+                    continue
+                target = local(destination)
+                if not target.exists():
+                    continue
+                if digest(read_bytes(target)) != entry['installed']:
+                    print(f'Preserved a newer external change: {destination}')
+                    continue
+                original = entry.get('original')
+                if original:
+                    if not re.fullmatch('[a-f0-9]{64}', original):
+                        raise RuntimeError('Unsafe manifest backup identifier.')
+                    atomic(target, read_bytes(no_symlinks(state / 'backups' / original)), entry.get('original_mode', 0o644))
+                else:
+                    target.unlink()
+            atomic(disabled, b'Disabled by Proxmox Makeover\n')
+            manifest_file.unlink(missing_ok=True)
+            print('Presentation removed; configuration and backups retained.')
+            return 0
+        config = load_makeover_config(local(MAKEOVER_CONFIG))
+        if args.automatic and not config['update_safe']:
+            print(json.dumps({'status': 'automatic-repair-off', 'version': VERSION}))
+            return 0
+        source = no_symlinks(Path(args.assets).absolute()) if args.assets else local('/usr/local/share/sls-proxmox-branding/assets')
+        makeover_source = local(MAKEOVER_SOURCE)
+        template = read_bytes(local(TEMPLATE)).decode()
+        clean = strip_block(template)
+        if len(re.findall(r'</head\s*>', clean, re.I)) != 1 or '/pve2/js/pvemanagerlib.js' not in clean:
+            raise RuntimeError('Unsupported current Proxmox template; no files changed. Use native UI and review this update.')
+        native_js = read_bytes(local(MANAGER + '/js/pvemanagerlib.js'), 32 * 1024 * 1024).decode()
+        for name in ('PVE.window.LoginWindow', 'PVE.node.Summary', 'PVE.node.StatusView'):
+            if not re.search(r'Ext\.define\([\'"]' + re.escape(name) + r'[\'"]', native_js):
+                raise RuntimeError(f'Current Proxmox architecture changed ({name}); no files changed.')
+        if not local(WIDGETS + '/themes/theme-proxmox-dark.css').is_file():
+            raise RuntimeError('The current native Proxmox dark theme is unavailable.')
+        files = {name: read_bytes(source / name) for name in ('SLS_Proxmox.png', 'SLS_Proxmox_Favicon.png', 'southland.css', 'southland.js')}
+        for name in ('dm-sans.ttf', 'oxanium.ttf'):
+            files['fonts/' + name] = read_bytes(source / 'fonts' / name, 2 * 1024 * 1024)
+        logo = validate_png(files['SLS_Proxmox.png'], 'logo')
+        icon = validate_png(files['SLS_Proxmox_Favicon.png'], 'favicon')
+        makeover_files = {name: read_bytes(makeover_source / name)
+                          for name in ('login-passkeys.js', 'native-security.js', 'makeover.js', 'makeover.css')}
+        # One existing tag loads primary login and native security before the
+        # editor. All three modules remain independently reviewable on disk.
+        makeover_bundle = b'\n;\n'.join(makeover_files[name] for name in ('login-passkeys.js', 'native-security.js', 'makeover.js'))
+        config_json = json.dumps(config, ensure_ascii=True, sort_keys=True, separators=(',', ':'))
+        safe_json = config_json.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+        config_js = ('/* Generated by Proxmox Makeover; presentation data only. */\nwindow.SLLMakeoverConfig = Object.freeze(' + safe_json + ');\n').encode()
+        version_inputs = dict(files)
+        version_inputs.update({f'makeover/{k}': v for k, v in makeover_files.items()})
+        version_inputs['config'] = config_json.encode()
+        version = digest(b''.join(k.encode() + v for k, v in sorted(version_inputs.items())))[:16]
+        block = f'''    {BEGIN}
+    <link id="sls-base-theme" rel="stylesheet" href="/pwt/themes/theme-proxmox-dark.css?ver=[% wtversion %]" />
+    <link id="sls-branding-css" rel="stylesheet" href="/pve2/css/southland.css?v={version}" />
+    <link id="sll-makeover-css" rel="stylesheet" href="/pve2/css/sll-makeover.css?v={version}" />
+    <link rel="icon" type="image/png" sizes="{icon['width']}x{icon['height']}" href="/pve2/images/SLS_Proxmox_Favicon.png?v={version}" />
+    <link rel="apple-touch-icon" href="/pve2/images/SLS_Proxmox_Favicon.png?v={version}" />
+    <meta name="theme-color" content="{config['colors']['background']}" />
+    <script src="/pve2/js/sll-makeover-config.js?v={version}"></script>
+    <script src="/pve2/js/southland.js?v={version}"></script>
+    <script src="/pve2/js/sll-makeover.js?v={version}"></script>
+    {END}
+'''
+        encoded = base64.b64encode(files['SLS_Proxmox.png']).decode()
+        # Fixed wrapper only: uploads can never supply SVG markup.
+        logo_svg = (f'<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{logo["width"]}" height="{logo["height"]}" viewBox="0 0 {logo["width"]} {logo["height"]}">'
+                    f'<image width="{logo["width"]}" height="{logo["height"]}" xlink:href="data:image/png;base64,{encoded}"/></svg>\n').encode()
+        planned = {
+            MANAGER + '/images/SLS_Proxmox.png': files['SLS_Proxmox.png'],
+            MANAGER + '/images/SLS_Proxmox_Favicon.png': files['SLS_Proxmox_Favicon.png'],
+            MANAGER + '/images/proxmox_logo.png': files['SLS_Proxmox.png'],
+            MANAGER + '/images/logo-128.png': files['SLS_Proxmox_Favicon.png'],
+            WIDGETS + '/images/proxmox_logo.svg': logo_svg,
+            MANAGER + '/css/southland.css': files['southland.css'],
+            MANAGER + '/js/southland.js': files['southland.js'],
+            MANAGER + '/css/sll-makeover.css': makeover_files['makeover.css'],
+            MANAGER + '/js/sll-makeover.js': makeover_bundle,
+            MANAGER + '/js/sll-makeover-config.js': config_js,
+            MANAGER + '/css/sls-dm-sans.ttf': files['fonts/dm-sans.ttf'],
+            MANAGER + '/css/sls-oxanium.ttf': files['fonts/oxanium.ttf'],
+            TEMPLATE: re.sub(r'(?im)^[ \t]*</head\s*>', lambda match: block + match.group(0), clean).encode(),
+        }
+        changed = [path for path, data in planned.items() if not local(path).exists() or read_bytes(local(path)) != data]
+        if args.check or args.dry_run:
+            print(json.dumps({'status': 'repair-needed' if changed else 'ok', 'version': version, 'release': VERSION, 'update_safe': config['update_safe'], 'changed': changed}, indent=2))
+            return 1 if changed and args.check else 0
+        if not changed:
+            print(f'Proxmox Makeover {version}: current.')
+            return 0
+        state.mkdir(parents=True, exist_ok=True, mode=0o700)
+        backups = no_symlinks(state / 'backups')
+        backups.mkdir(exist_ok=True, mode=0o700)
+        previous_manifest = read_bytes(manifest_file) if manifest_file.exists() else None
+        undo = []
+        try:
+            for destination in changed:
+                target = local(destination)
+                current = read_bytes(target) if target.exists() else None
+                old_mode = stat.S_IMODE(target.stat().st_mode) if target.exists() else 0o644
+                entry = dict(manifest.get(destination, {}))
+                if current is not None and digest(current) != entry.get('installed'):
+                    original = clean.encode() if destination == TEMPLATE else current
+                    original_hash = digest(original)
+                    if not (backups / original_hash).exists():
+                        atomic(backups / original_hash, original, 0o600)
+                    entry.update(original=original_hash, original_mode=old_mode)
+                elif current is None:
+                    entry.setdefault('original', None)
+                entry['installed'] = digest(planned[destination])
+                manifest[destination] = entry
+                atomic(manifest_file, (json.dumps(manifest, indent=2) + '\n').encode(), 0o600)
+                undo.append((target, current, old_mode))
+                atomic(target, planned[destination])
+        except Exception as error:
+            failures = []
+            for target, old, mode in reversed(undo):
+                try:
+                    atomic(target, old, mode) if old is not None else target.unlink(missing_ok=True)
+                except Exception as rollback_error:
+                    failures.append(str(rollback_error))
+            try:
+                atomic(manifest_file, previous_manifest, 0o600) if previous_manifest is not None else manifest_file.unlink(missing_ok=True)
+            except Exception as rollback_error:
+                failures.append(str(rollback_error))
+            raise RuntimeError(f'Overlay failed: {error}. Rollback: ' + ('; '.join(failures) if failures else 'complete')) from error
+        # Keep all current originals plus 20 unused historical blobs. Never
+        # prune files outside this helper's hash-named backup namespace.
+        try:
+            required = {entry.get('original') for entry in manifest.values()}
+            historical = sorted((p for p in backups.iterdir()
+                                 if re.fullmatch('[a-f0-9]{64}', p.name) and p.name not in required),
+                                key=lambda p: p.lstat().st_mtime, reverse=True)
+            for old_backup in historical[20:]:
+                if no_symlinks(old_backup).is_file():
+                    old_backup.unlink()
+        except (OSError, RuntimeError) as cleanup_error:
+            print(f'Proxmox Makeover backup retention needs review: {cleanup_error}', file=sys.stderr)
+        print(f'Proxmox Makeover {version}: applied {len(changed)} files using the current vendor layout.')
+        return 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except Exception as error:
+        print(f'Proxmox Makeover ERROR: {error}', file=sys.stderr)
+        sys.exit(1)

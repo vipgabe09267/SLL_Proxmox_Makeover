@@ -1,0 +1,43 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  checks:
+    uses: ./.github/workflows/checks.yml
+  publish:
+    needs: checks
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check tag and build
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=$(cat VERSION)
+          test "$RELEASE_TAG" = "v$version"
+          test -f "docs/RELEASE-NOTES-$version.md"
+          python3 tools/build-release.py
+          (cd dist && sha256sum --check SHA256SUMS)
+      - name: Publish beta
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=$(cat VERSION)
+          gh release create "$RELEASE_TAG" \
+            "dist/proxmox-makeover-$version.tar.gz" dist/SHA256SUMS \
+            --verify-tag --prerelease --title "Proxmox Makeover $RELEASE_TAG" \
+            --notes-file "docs/RELEASE-NOTES-$version.md"

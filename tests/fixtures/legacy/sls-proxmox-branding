@@ -1,0 +1,258 @@
+#!/usr/bin/python3
+"""Reapply Southland assets to the current Proxmox packages, never pin old package files."""
+import argparse
+import base64
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import struct
+import sys
+import tempfile
+
+BEGIN = '<!-- BEGIN SOUTHLAND BRANDING -->'
+END = '<!-- END SOUTHLAND BRANDING -->'
+TEMPLATE = '/usr/share/pve-manager/index.html.tpl'
+MANAGER = '/usr/share/pve-manager'
+WIDGETS = '/usr/share/javascript/proxmox-widget-toolkit'
+MAKEOVER_CONFIG = '/etc/sll-proxmox-makeover/config.json'
+MAKEOVER_SOURCE = '/usr/local/share/sls-proxmox-branding/makeover'
+
+DEFAULT_MAKEOVER_CONFIG = {
+    'schema_version': 1,
+    'company_name': 'Southland Labs',
+    'project_name': 'Proxmox Makeover',
+    'product_label': 'Proxmox VE',
+    'page_title': 'Infrastructure - Southland Labs | Proxmox VE',
+    'login_eyebrow': 'Infrastructure console',
+    'login_heading': 'Welcome back.',
+    'login_subtitle': 'Sign in to manage your infrastructure.',
+    'footer_text': 'Southland Labs',
+    'website_url': 'https://southlandlabs.dev/',
+    'show_storage_panel': True,
+    'colors': {
+        'background': '#141716',
+        'surface': '#1b201e',
+        'raised': '#242b26',
+        'border': '#343c36',
+        'accent': '#d5b98c',
+        'secondary': '#bac8ad',
+        'text': '#eeede6',
+        'muted': '#a5ada7',
+    },
+}
+
+
+def digest(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def atomic(path, data, mode=0o644):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix='.sls-', dir=path.parent)
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+            os.fchmod(stream.fileno(), mode)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def strip_block(template):
+    if template.count(BEGIN) != template.count(END) or template.count(BEGIN) > 1:
+        raise RuntimeError('Unrecognized branding markers; leaving the template untouched.')
+    return re.sub(r'    ' + re.escape(BEGIN) + r'.*?' + re.escape(END) + r'\n', '', template, flags=re.S)
+
+
+def load_makeover_config(path):
+    config = json.loads(path.read_text()) if path.exists() else DEFAULT_MAKEOVER_CONFIG
+    if not isinstance(config, dict):
+        raise RuntimeError('Makeover configuration must be a JSON object.')
+    expected = set(DEFAULT_MAKEOVER_CONFIG)
+    if set(config) != expected or config.get('schema_version') != 1:
+        raise RuntimeError('Makeover configuration fields or schema version are invalid.')
+    text_limits = {
+        'company_name': 80, 'project_name': 80, 'product_label': 80, 'page_title': 160,
+        'login_eyebrow': 100, 'login_heading': 100, 'login_subtitle': 240, 'footer_text': 120,
+    }
+    for key, limit in text_limits.items():
+        value = config.get(key)
+        if not isinstance(value, str) or not value or len(value) > limit or re.search(r'[\x00-\x1f\x7f]', value):
+            raise RuntimeError(f'Invalid Makeover text field: {key}')
+    url = config.get('website_url')
+    if not isinstance(url, str) or len(url) > 512 or not re.fullmatch(r'https://[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:/[^\s]*)?', url):
+        raise RuntimeError('Makeover website_url must be a safe HTTPS URL.')
+    if not isinstance(config.get('show_storage_panel'), bool):
+        raise RuntimeError('Makeover show_storage_panel must be boolean.')
+    colors = config.get('colors')
+    if not isinstance(colors, dict) or set(colors) != set(DEFAULT_MAKEOVER_CONFIG['colors']):
+        raise RuntimeError('Makeover color fields are invalid.')
+    for key, value in colors.items():
+        if not isinstance(value, str) or not re.fullmatch(r'#[0-9a-fA-F]{6}', value):
+            raise RuntimeError(f'Invalid Makeover color: {key}')
+    return config
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--check', action='store_true', help='Read-only drift check; exit 1 if repairs are needed')
+    group.add_argument('--dry-run', action='store_true')
+    group.add_argument('--remove', action='store_true', help='Disable repair and remove branding safely')
+    group.add_argument('--enable', action='store_true', help='Enable branding after removal')
+    parser.add_argument('--root', default='/', help='Alternate filesystem root for upgrade simulations')
+    parser.add_argument('--assets', help='Override source asset directory for staging')
+    args = parser.parse_args()
+    root = Path(args.root).resolve()
+    local = lambda path: root / path.lstrip('/')
+    state = local('/var/lib/sls-proxmox-branding')
+    disabled = local('/etc/sls-proxmox-branding.disabled')
+    lockfile = local('/run/lock/sls-proxmox-branding.lock')
+    lockfile.parent.mkdir(parents=True, exist_ok=True)
+    with lockfile.open('w') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        if args.enable:
+            disabled.unlink(missing_ok=True)
+        if disabled.exists() and not args.remove:
+            print('Southland branding is disabled; use --enable to reapply.')
+            return 0
+        manifest_file = state / 'manifest.json'
+        manifest = json.loads(manifest_file.read_text()) if manifest_file.exists() else {}
+        if args.remove:
+            atomic(disabled, b'Disabled by sls-proxmox-branding --remove\n')
+            template_path = local(TEMPLATE)
+            if template_path.exists():
+                current = template_path.read_text()
+                clean = strip_block(current)
+                if clean != current:
+                    atomic(template_path, clean.encode())
+            for destination, entry in manifest.items():
+                if destination == TEMPLATE:
+                    continue
+                target = local(destination)
+                if not target.exists():
+                    continue
+                if digest(target.read_bytes()) != entry['installed']:
+                    print(f'Preserved a newer external change: {destination}')
+                    continue
+                if entry.get('original'):
+                    atomic(target, (state / 'backups' / entry['original']).read_bytes())
+                else:
+                    target.unlink()
+            # Original backups remain available; a new installation starts fresh tracking.
+            manifest_file.unlink(missing_ok=True)
+            print('Southland branding removed; automatic repair disabled. No service restart needed.')
+            return 0
+
+        source = Path(args.assets) if args.assets else local('/usr/local/share/sls-proxmox-branding/assets')
+        makeover_source = local(MAKEOVER_SOURCE)
+        for required in ('makeover.js', 'makeover.css'):
+            if not (makeover_source / required).is_file():
+                raise RuntimeError(f'Missing Makeover UI source: {required}')
+        makeover_config = load_makeover_config(local(MAKEOVER_CONFIG))
+        template = local(TEMPLATE).read_text()
+        clean = strip_block(template)
+        if clean.count('</head>') != 1 or '/pve2/js/pvemanagerlib.js' not in clean:
+            raise RuntimeError('Unknown Proxmox template structure; refusing to patch. Review this upgrade.')
+        native_js = local(MANAGER + '/js/pvemanagerlib.js').read_text()
+        if "Ext.define('PVE.window.LoginWindow'" not in native_js:
+            raise RuntimeError('Proxmox login architecture changed; review the branding before applying.')
+        if not local(WIDGETS + '/themes/theme-proxmox-dark.css').is_file():
+            raise RuntimeError('Native Proxmox dark theme is missing; refusing a partial theme install.')
+        files = {str(path.relative_to(source)): path.read_bytes() for path in sorted(source.rglob('*')) if path.is_file()}
+        for name in ['SLS_Proxmox.png', 'SLS_Proxmox_Favicon.png']:
+            if not files[name].startswith(b'\x89PNG\r\n\x1a\n'):
+                raise RuntimeError(f'Invalid PNG: {name}')
+        logo_width, logo_height = struct.unpack('>II', files['SLS_Proxmox.png'][16:24])
+        icon_width, icon_height = struct.unpack('>II', files['SLS_Proxmox_Favicon.png'][16:24])
+        makeover_files = {
+            path.name: path.read_bytes() for path in sorted(makeover_source.iterdir()) if path.is_file()
+        }
+        config_json = json.dumps(makeover_config, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+        safe_config_json = config_json.replace('<', '\\u003c').replace('>', '\\u003e').replace('&', '\\u0026')
+        config_js = ('/* Generated from validated local Makeover configuration. */\n' +
+                     'window.SLLMakeoverConfig = Object.freeze(' + safe_config_json + ');\n').encode()
+        version_inputs = dict(files)
+        version_inputs.update({f'makeover/{name}': data for name, data in makeover_files.items()})
+        version_inputs['makeover/config.json'] = config_json.encode()
+        version = digest(b''.join(name.encode() + data for name, data in sorted(version_inputs.items())))[:16]
+        block = f'''    {BEGIN}
+    <link id="sls-base-theme" rel="stylesheet" href="/pwt/themes/theme-proxmox-dark.css?ver=[% wtversion %]" />
+    <link id="sls-branding-css" rel="stylesheet" href="/pve2/css/southland.css?v={version}" />
+    <link id="sll-makeover-css" rel="stylesheet" href="/pve2/css/sll-makeover.css?v={version}" />
+    <link rel="icon" type="image/png" sizes="{icon_width}x{icon_height}" href="/pve2/images/SLS_Proxmox_Favicon.png?v={version}" />
+    <link rel="apple-touch-icon" href="/pve2/images/SLS_Proxmox_Favicon.png?v={version}" />
+    <meta name="theme-color" content="{makeover_config['colors']['background']}" />
+    <script src="/pve2/js/sll-makeover-config.js?v={version}"></script>
+    <script src="/pve2/js/southland.js?v={version}"></script>
+    <script src="/pve2/js/sll-makeover.js?v={version}"></script>
+    {END}
+'''
+        encoded = base64.b64encode(files['SLS_Proxmox.png']).decode()
+        logo_svg = ('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" '
+                    f'width="{logo_width}" height="{logo_height}" viewBox="0 0 {logo_width} {logo_height}">'
+                    '<title>Proxmox - Southland Labs</title>'
+                    f'<image width="{logo_width}" height="{logo_height}" xlink:href="data:image/png;base64,{encoded}"/></svg>\n').encode()
+        planned = {}
+        for name, data in files.items():
+            if name.startswith('fonts/'):
+                if name.endswith('.ttf'):
+                    planned[MANAGER + '/css/sls-' + Path(name).name] = data
+            elif name.endswith('.png'):
+                planned[MANAGER + '/images/' + name] = data
+            elif name.endswith('.css'):
+                planned[MANAGER + '/css/' + name] = data
+            elif name.endswith('.js'):
+                planned[MANAGER + '/js/' + name] = data
+        planned[WIDGETS + '/images/proxmox_logo.svg'] = logo_svg
+        planned[MANAGER + '/images/proxmox_logo.png'] = files['SLS_Proxmox.png']
+        planned[MANAGER + '/images/logo-128.png'] = files['SLS_Proxmox_Favicon.png']
+        planned[MANAGER + '/css/sll-makeover.css'] = makeover_files['makeover.css']
+        planned[MANAGER + '/js/sll-makeover.js'] = makeover_files['makeover.js']
+        planned[MANAGER + '/js/sll-makeover-config.js'] = config_js
+        # The template is committed last, after all its local dependencies exist.
+        planned[TEMPLATE] = re.sub(r'(?m)^[ \t]*</head>', lambda match: block + match.group(0), clean).encode()
+        changed = [path for path, data in planned.items() if not local(path).exists() or local(path).read_bytes() != data]
+        if args.check or args.dry_run:
+            print(json.dumps({'status': 'repair-needed' if changed else 'ok', 'version': version, 'changed': changed}, indent=2))
+            return 1 if changed and args.check else 0
+        if not changed:
+            print(f'Southland branding {version}: all files current.')
+            return 0
+        state.mkdir(parents=True, exist_ok=True, mode=0o700)
+        (state / 'backups').mkdir(exist_ok=True, mode=0o700)
+        for destination in changed:
+            target = local(destination)
+            current = target.read_bytes() if target.exists() else None
+            entry = manifest.get(destination, {})
+            if current is not None and digest(current) != entry.get('installed'):
+                original = clean.encode() if destination == TEMPLATE else current
+                original_hash = digest(original)
+                backup = state / 'backups' / original_hash
+                if not backup.exists():
+                    atomic(backup, original, 0o600)
+                entry['original'] = original_hash
+            elif current is None:
+                entry.setdefault('original', None)
+            entry['installed'] = digest(planned[destination])
+            manifest[destination] = entry
+            # Save recovery metadata before each write so interruption cannot lose the original.
+            atomic(manifest_file, (json.dumps(manifest, indent=2) + '\n').encode(), 0o600)
+            atomic(target, planned[destination])
+            print(f'Applied {destination}')
+        print(f'Southland branding {version}: applied {len(changed)} files. No service restart needed.')
+        return 0
+
+
+if __name__ == '__main__':
+    try:
+        sys.exit(main())
+    except Exception as error:
+        print(f'Southland branding ERROR: {error}', file=sys.stderr)
+        sys.exit(1)

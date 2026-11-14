@@ -1,0 +1,10 @@
+.dev/
+__pycache__/
+*.pyc
+node_modules/
+dist/
+*.deb
+.env
+evidence/
+.passkeys-test-*/
+.passkeys-browser-*/

@@ -1,0 +1,60 @@
+/* Proxmox Makeover by Southland Labs settings UI. */
+.sls-brand .sll-makeover-window .x-window-header-title-default {
+    color: var(--sls-accent);
+}
+.sls-brand .sll-makeover-window .x-fieldset-header-text {
+    color: var(--sls-text);
+    font-weight: 600;
+}
+.sll-makeover-intro {
+    border-bottom: 1px solid var(--sls-border);
+    margin: 0 0 16px;
+    padding: 0 0 14px;
+}
+.sll-makeover-intro h2 {
+    color: var(--sls-text);
+    font: 400 24px/1.2 Georgia, "Times New Roman", serif;
+    margin: 0 0 8px;
+}
+.sll-makeover-intro p {
+    color: var(--sls-muted);
+    line-height: 1.55;
+    margin: 0;
+    max-width: 75ch;
+}
+.sll-makeover-safety {
+    background: color-mix(in srgb, var(--sls-secondary) 9%, var(--sls-surface));
+    border: 1px solid var(--sls-border);
+    border-radius: 4px;
+    color: var(--sls-muted);
+    line-height: 1.5;
+    margin-top: 12px;
+    padding: 10px 12px;
+}
+.sll-makeover-safety .fa {
+    color: var(--sls-accent);
+    margin-right: 7px;
+}
+.sll-makeover-security-key p {
+    color: var(--sls-text);
+    margin: 0 0 8px;
+}
+.sll-makeover-security-key dl {
+    display: grid;
+    grid-template-columns: minmax(120px, 180px) 1fr;
+    line-height: 1.45;
+    margin: 0 0 12px;
+}
+.sll-makeover-security-key dt {
+    color: var(--sls-muted);
+}
+.sll-makeover-security-key dd {
+    color: var(--sls-text);
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+@media (max-width: 700px) {
+    .sll-makeover-window .x-form-item-label-default {
+        width: 135px !important;
+    }
+}

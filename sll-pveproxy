@@ -1,0 +1,12 @@
+#!/usr/bin/perl -T
+
+BEGIN {
+    $ENV{SLL_MAKEOVER_SERVICE} = 'pveproxy';
+    eval {
+        require SLL::Makeover::Bootstrap;
+        1;
+    } or warn "Proxmox Makeover extension unavailable; starting native pveproxy: $@";
+}
+
+my $result = do '/usr/bin/pveproxy';
+die "unable to execute native /usr/bin/pveproxy: $@ $!\n" if !defined($result);

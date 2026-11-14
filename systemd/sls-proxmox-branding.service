@@ -1,0 +1,8 @@
+[Unit]
+Description=Repair Proxmox Makeover presentation after package updates
+After=pve-cluster.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/sls-proxmox-branding --automatic
+UMask=0077

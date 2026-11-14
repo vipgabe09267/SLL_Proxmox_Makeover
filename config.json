@@ -1,0 +1,28 @@
+{
+  "schema_version": 2,
+  "company_name": "Southland Labs",
+  "project_name": "Proxmox Makeover",
+  "product_label": "Proxmox VE",
+  "page_title": "Infrastructure - Southland Labs | Proxmox VE",
+  "login_eyebrow": "Infrastructure console",
+  "login_heading": "Welcome back.",
+  "login_subtitle": "Sign in to manage your infrastructure.",
+  "footer_text": "Southland Labs",
+  "website_url": "https://southlandlabs.dev/",
+  "show_storage_panel": true,
+  "colors": {
+    "background": "#141716",
+    "surface": "#1b201e",
+    "raised": "#242b26",
+    "border": "#343c36",
+    "accent": "#d5b98c",
+    "secondary": "#bac8ad",
+    "text": "#eeede6",
+    "muted": "#a5ada7"
+  },
+  "update_safe": true,
+  "fonts": {
+    "login": "default",
+    "dashboard": "default"
+  }
+}

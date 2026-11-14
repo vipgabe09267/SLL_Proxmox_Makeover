@@ -1,0 +1,12 @@
+#!/usr/bin/perl -T
+
+BEGIN {
+    $ENV{SLL_MAKEOVER_SERVICE} = 'pvedaemon';
+    eval {
+        require SLL::Makeover::Bootstrap;
+        1;
+    } or warn "Proxmox Makeover extension unavailable; starting native pvedaemon: $@";
+}
+
+my $result = do '/usr/bin/pvedaemon';
+die "unable to execute native /usr/bin/pvedaemon: $@ $!\n" if !defined($result);

@@ -1,0 +1,22 @@
+[Unit]
+Description=Watch Proxmox Makeover files for package replacements
+
+[Path]
+PathChanged=/usr/share/pve-manager/index.html.tpl
+PathChanged=/usr/share/javascript/proxmox-widget-toolkit/images/proxmox_logo.svg
+PathChanged=/usr/share/pve-manager/images/proxmox_logo.png
+PathChanged=/usr/share/pve-manager/images/logo-128.png
+PathChanged=/usr/share/pve-manager/css/southland.css
+PathChanged=/usr/share/pve-manager/js/southland.js
+PathChanged=/usr/share/pve-manager/css/sll-makeover.css
+PathChanged=/usr/share/pve-manager/js/sll-makeover.js
+PathChanged=/usr/share/pve-manager/js/sll-makeover-config.js
+PathChanged=/etc/sll-proxmox-makeover/config.json
+PathChanged=/usr/local/share/sls-proxmox-branding/makeover/makeover.css
+PathChanged=/usr/local/share/sls-proxmox-branding/makeover/makeover.js
+PathChanged=/usr/local/share/sls-proxmox-branding/makeover/native-security.js
+PathChanged=/usr/local/share/sls-proxmox-branding/makeover/login-passkeys.js
+Unit=sls-proxmox-branding.service
+
+[Install]
+WantedBy=multi-user.target
